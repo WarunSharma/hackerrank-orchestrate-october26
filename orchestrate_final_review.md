@@ -1,0 +1,43 @@
+# Independent last-pass review — HackerRank Orchestrate
+
+Reviewed from the uploaded repository snapshot on 25 October 2026. This is **analysis**, not a claim that the final output has been generated. Preserve the official audit cutoff and do not hardcode case IDs or fabricate evidence.
+
+## Confirmed implementation blockers (highest priority)
+
+1. **PNG evidence never becomes a normalized observation.** `src/reconstruction.ts` `extractEvidence()` (around lines 827–857) has parsers for JSON, SQL, logs and PDFs, but none for PNG/JPEG. Returning `inspected: true` on PNG is not the same as understanding it. The PNG is passed to the model only after the fragile `opaquePackets()` eligibility/grounding gate (`src/planner.ts` around 205–255).
+2. **The ordinary CLI never enables Gemini.** `src/main.ts` calls `generateRows()` without an investigator, so the default is `NoopEvidenceInvestigator`, regardless of `.env`. The SDK adapter exists but is not selected in production CLI. Add explicit `LLM_ENABLED` gating and a real `GeminiEvidenceInvestigator(loadGeminiConfig())` only when requested.
+3. **Vision response schema requires data the screenshot cannot possibly provide.** In `src/investigator.ts`, the response requires exact `event_time`, `resource_id`, and a matched alias explicitly visible in the image. A screenshot can establish a state *at observation/capture time*, even without an event-time row. Preserve a distinct `observedAt` (`manifest.captured_at`), while allowing `eventTime` to be optional. Do not invent a date from status text. Use deterministic catalog links to map *visible external IDs* to canonical internal resource IDs, rather than asking the model to hallucinate IDs absent from the screen.
+4. **Canonical linked-resource attribution is not the same as what is printed on the image.** Catalog `LINK_RESOURCE_IDENTITY` rows `activity_4001`–`4011` link subject+resource identifiers to screenshots with ~7-minute offsets. Several images visibly show the canonical ID; others show a filename or `user_id` and must be joined via verified link metadata. Timestamp proximity alone is insufficient. `observationsFromResponse()` currently rejects model observations not exactly matching the linked internal ID.
+5. **Category and rule mapping has dangerous defaults.** `categoryFor()` in `src/planner.ts` defaults unknown resource prefixes to `USER_PROFILE`, including `object_19` (should be `SUPPORT_ATTACHMENT` when independently supported by its attachment catalog), `audit_record_003` (`SECURITY_AUDIT_LOG`), and `marketing_001` (`MARKETING_PROFILE`). `policyActions()` reduces rules to a category/action map, ignoring the `condition` column. Backup presence without proven restore permission must not automatically become `ACTIVE`/`REPORT_RESTORE_RISK`.
+6. **Gemini enum omits a legitimate state.** `resourceStates` in `src/investigator.ts` includes `PRESENT`, `ABSENT`, `ACTIVE`, `DISABLED`, `BLOCKED`, `REDACTED`, but not `ANONYMIZED`, although TypeScript `ResourceState` includes it. This blocks proper compliant analytics screenshots.
+7. **Potential unsound PDF shortcut.** `parsePdfEvidence()` in `src/reconstruction.ts` (around lines 350–370) emits `PRESENT` and uses capture time whenever a PDF contains exactly one resource ID and one email, without explicit state. Restrict this behavior to demonstrated, resource-bearing stored artifacts, not arbitrary business papers.
+
+## Directly inspected candidate evidence
+
+| Case | Source | Independent finding | Proposed handling |
+|---|---|---|---|
+| `case_35` | `evidence_09`, search screenshot | `search_428`, `user_13`, exact requester email; search result exists before cutoff | Strong supported `PRESENT` -> search DELETE violation |
+| `case_39` | `evidence_14`, connector screenshot | `data_flow_1121`, exact requester selector, `Continuous` mode, `Healthy`, delivered events | Strong `ACTIVE` flow candidate -> disable and verify |
+| `case_50` | `evidence_19`, analytics screenshot | `analytics_7438` and exact requester email, attributable profile | Strong `PRESENT` -> anonymize |
+| `case_52` | `evidence_23`, export screenshot | `export_1260` owned by requester and status `Ready` | Strong existing export -> delete |
+| `case_53` | `evidence_28`, support screenshot | `support_1034`, Kofi/requester email and unredacted conversation | Strong `PRESENT`/exposed PII -> redact under applicable conditional policy |
+| `case_61` | `evidence_46`, object screenshot + `activity_4007` | `delivery_confirmation_19.pdf` exists; catalog explicitly maps it to `object_19`, solely owned by requester | Strong attachment-present candidate; canonical association must come from catalog, not image OCR |
+| `case_33` | `evidence_18`, statement PDF + `activity_4009` | Statement ID `NST-2026-0718-1842`, customer `user_18`, PII; catalog maps to `export_1842` | **Previously overlooked:** investigate tangible linked `USER_EXPORT` artifact rather than requiring literal `PRESENT` in the PDF |
+| `case_45` | `evidence_37` screenshot + `evidence_55` signed journal | `audit_record_003`, `user_03`; journal explicitly retains until August 2027 | Strong positive retained security-record evidence, not proof of every other record's compliance |
+| `case_46` | `evidence_42` reference screenshot + `activity_4011` | Displays only stable `user_17` references; catalog maps it to `tombstone_17` | Tombstone redaction candidate; needs safe `user_17` -> `tombstone_17` linking, not raw model ID invention |
+| `case_55` | `evidence_32`, backup screenshot | `backup_9287` owned by requester, archive is stored | Proves archive presence; **does not by itself prove** restore access active or blocked. Investigate conditional restore rule, don't fabricate ACTIVE |
+| `case_63` | `evidence_60`, marketing screenshot + `activity_4008` | `marketing_001` visibly belongs to a different customer (Soo-jin Park), but catalog links it to Kwame | Genuine conflicting ownership; no reliable finding for Kwame from this image alone |
+
+All screenshot captures are before their corresponding audit cutoffs. Use the manifest timestamps and source links, not information from post-cutoff artifacts.
+
+## Recommended implementation order under time/credit pressure
+
+1. **Do not re-investigate all 518 cases or redesign OpenSpec.** Write targeted fixture tests for the 7–8 clearly supported candidates; preserve current passing samples.
+2. Create a bounded `VisualObservation` result type: `visibleIdentifier`, `visibleResourceLabel`, `visibleStatusText`, `visualLocation`, optional explicit `eventTime`, and an observation `observedAt` provided by the orchestrator from manifest capture. Resolve canonical IDs/categories with trusted catalog links in TypeScript. Validate extracted state with a category-aware mapper.
+3. Wire the real Gemini SDK through `main.ts` with `LLM_ENABLED=true`, then call it only on grounded pre-cutoff screenshots. Mock first; limit paid calls and retry budget. Use structured JSON/Zod; log usage. Do not ask model for unseen canonical IDs.
+4. Add mapping for `SUPPORT_ATTACHMENT`, `SECURITY_AUDIT_LOG`, `MARKETING_PROFILE` and `ANONYMIZED` state; review backup-specific policy. Verify `case_33` statement-to-export link deterministically.
+5. Run `npm test`, `npm run evaluate`, full generation; compare before/after unresolved and sample step/field/sequence metrics. Generate `output.csv` only when 518 rows have contract-valid, evidence-supported results. Distinguish unresolved input limitations; do not invent a fallback status.
+
+## New Copilot session prompt
+
+> I uploaded an independent review of the repository. The likely core issue is that PNG screenshots never produce observations, and the Gemini response contract requires event timestamps/internal IDs that are not printed on these screenshots. Our `main.ts` also defaults to a no-op investigator even with `.env`. Please verify these against `src/reconstruction.ts`, `src/planner.ts`, and `src/investigator.ts`, then make the smallest generalizable fix. Use the manifest capture time as a **snapshot observation time** (not an invented event time), and reconcile visible labels to canonical resource IDs only through grounded catalog links. Start with the screenshot-driven evidence, plus the PDF `evidence_18` / `activity_4009` export link. Add focused tests, keep the existing cutoff and association protections, and avoid hardcoding any case IDs. Run the sample evaluation and full pipeline and report status/steps and unresolved counts. Don't guess outcomes for backup restore permissions or conflicting marketing ownership. Preserve append-only `log.txt` logging and do not make real model calls until fixtures pass.

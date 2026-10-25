@@ -23,7 +23,7 @@ cd hackerrank-orchestrate-october26
 
 Start your AI coding tool from the **repository root** so it automatically reads [`AGENTS.md`](./AGENTS.md) and logs your session turns to `log.txt` in the root directory.
 
-Build your solution in `code/main.py`, or use another language and document its setup and run command clearly in your README.
+The TypeScript CLI validates the participant-facing inputs, reconstructs evidence, and writes the root-level submission when every case is resolved. Gemini investigation is opt-in; deterministic evidence processing runs without external model calls by default.
 
 Your solution must:
 
@@ -31,13 +31,18 @@ Your solution must:
 - Generate one prediction row for every request in `dataset/deletion_requests.csv`
 - Write the final predictions to `output.csv` in the repository root
 
-Run the starter Python entry point with:
+From the repository root, install, build, test, and run input validation:
 
 ```bash
-python3 code/main.py
+npm install
+npm run build
+npm test
+npm run run
 ```
 
-The blank template at `dataset/output.csv` is provided as a reference. Your final generated file for submission must be the root-level `output.csv`.
+The command writes the generated submission to the repository-root [`output.csv`](./output.csv); [`dataset/output.csv`](./dataset/output.csv) remains the blank format reference. It refuses to write a partial file if relevant evidence remains unresolved.
+
+To enable the existing Gemini investigator, copy `.env.example` to `.env`, set `LLM_ENABLED=true` and `GEMINI_API_KEY`, then run `npm run run`. `GEMINI_MODEL` is optional. With `LLM_ENABLED` unset or `false`, the CLI makes no model calls even if a key is configured. The investigator is invoked only for grounded, eligible opaque evidence.
 
 
 ## Dataset
@@ -145,6 +150,14 @@ When packaging `code.zip`:
 - Keep your evaluation reports in `code/evaluation/` so they are bundled automatically with `code` (or add `evaluation` to the archive command above if you placed them in a top-level `evaluation/` directory).
 - Do **not** include `dataset/`, virtual environments (`.venv`, `venv`, `node_modules`), or build caches (`__pycache__`). On Windows, keep `.venv` at the repository root (outside `code/`) and remove any `code/__pycache__` folders before running `Compress-Archive`.
 - Do **not** include nested archives (`.zip`, `.tar`, `.gz`, `.tgz`, `.7z`, `.rar`) inside `code.zip` — submissions containing nested archive files will be rejected.
+
+This repository also provides a reproducible macOS/Linux packaging command. From the repository root, run:
+
+```bash
+./scripts/package-code.sh
+```
+
+The script creates `code.zip` containing `README.md`, the TypeScript source and build configuration, `package.json`, `package-lock.json`, and `code/evaluation/`. It deliberately excludes `dataset/`, `node_modules/`, `dist/`, `.env`, agent logs, OpenSpec files, and nested archives. The root `log.txt` remains separate for the `chat_transcript` submission.
 
 Before submitting, confirm that:
 

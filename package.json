@@ -1,0 +1,21 @@
+{
+  "name": "ghost-data-still-exists",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/main.js",
+    "run": "npm run build && npm run start",
+    "test": "npm run build && node --test dist/*.test.js",
+    "evaluate": "npm run build && node dist/evaluation.js"
+  },
+  "dependencies": {
+    "@google/genai": "^2.27.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "typescript": "^5.7.3"
+  }
+}
