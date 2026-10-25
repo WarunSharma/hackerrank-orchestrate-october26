@@ -170,6 +170,12 @@ function isEligible(packet: EvidencePacket): boolean {
 function observationsFromResponse(packet: EvidencePacket, response: InvestigationResponse): EvidenceObservation[] {
   const aliases = new Set(packet.aliases.map(normalize));
   const linkedResources = packet.linkedResources ?? [];
+  if (linkedResources.length > 0) {
+    const hasSubjectMatch = response.identifier_matches.some((identifier) => aliases.has(normalize(identifier)));
+    const hasConflictingIdentifier = response.identifier_matches.some((identifier) => !aliases.has(normalize(identifier)));
+    if (hasConflictingIdentifier
+      || (!hasSubjectMatch && linkedResources.some((resource) => resource.category !== "SUPPORT_ATTACHMENT"))) return [];
+  }
   return response.observations.flatMap((item) => {
     if (item.matched_identifier && !aliases.has(normalize(item.matched_identifier))) return [];
     if (item.event_time && Date.parse(item.event_time) > Date.parse(packet.auditAt)) return [];
@@ -382,9 +388,11 @@ export class GeminiEvidenceInvestigator implements EvidenceInvestigator {
         `${resource.systemId}/${resource.resourceId} visible_labels=${resource.visibleLabels.join("|")} category=${resource.category} link_evidence_id=${resource.linkEvidenceId} linked_at=${resource.linkedAt}`).join("; ") || "none"}`,
       "Use the response schema exactly. If the artifact cannot support a valid observation, return UNRESOLVED with an empty observations array.",
       "For each observation, copy visible_resource_label exactly as it appears in the artifact. Do not return a canonical ID merely because it appears in linked metadata; the application resolves visible labels through those grounded links.",
+      "For linked resources, include only identifiers visibly matching a known alias. If a visible owner/customer identifier conflicts with the known aliases or the linked resource identity, return UNRESOLVED instead of asserting an observation.",
       "Only include system_id, matched_identifier, or event_time when explicitly visible in the artifact. If no event time is printed, omit event_time; the application records captured_at separately as observedAt.",
       "Do not infer missing date parts, timestamps, systems, resource IDs, or identifiers from context. Do not establish ownership from timestamp proximity alone.",
       `state must be one of ${resourceStates.join(", ")} and must describe deletion/resource state only.`,
+      "For BACKUP_ARCHIVE, report ACTIVE only when restore access is explicitly allowed or unblocked, and BLOCKED only when restore is explicitly denied or blocked. Archive presence alone is PRESENT and does not establish restore access.",
       "For ACCOUNT_TOMBSTONE, report REDACTED only when the stable internal reference remains and prohibited direct identifiers are visibly absent; a retained reference is not an active customer profile.",
       "Document or business statuses such as delivered, paid, dispatched, or shipped are not valid state values. Do not translate them into a deletion state unless the artifact explicitly states that the resource is present, absent, active, disabled, or blocked.",
       "Return JSON with inspection_status, identifier_matches, observations, and unresolved_reason.",

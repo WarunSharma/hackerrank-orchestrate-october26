@@ -4,7 +4,7 @@
 
 This report separates the two manually executed Gemini investigations from deterministic pipeline runs. It does not infer historical usage that was not persisted by the application.
 
-The eventual final 518-case submission run has not occurred: the deterministic pipeline currently resolves 503 cases and refuses to write `output.csv` while 15 cases remain unresolved.
+The final 518-case submission output has not been produced. After the latest deterministic fixes, 508 cases resolve and 10 remain blocked on opaque screenshots. A Gemini-enabled attempt was also run; it made 23 API calls but still had unresolved evidence, so the CLI correctly refused to write `output.csv`.
 
 ## Recorded manual Gemini experiments
 
@@ -29,12 +29,23 @@ For the two recorded manual requests, the average was **1,330.5 input tokens**, 
 
 ## Deterministic pipeline runs
 
-Gemini was disabled for the measured pipeline runs. The pipeline used `NoopEvidenceInvestigator`; therefore these measured runs made no Gemini API calls and consumed no Gemini input/output tokens.
+The deterministic pipeline used `NoopEvidenceInvestigator`; these runs made no Gemini API calls and consumed no Gemini input/output tokens.
 
 | Run | Cases | Gemini calls | Input tokens | Output tokens | Cache hits | Gemini estimated cost | Result |
 | --- | ---: | ---: | ---: | ---: | ---: | --- | --- |
 | Public sample evaluation | 32 | 0 | 0 | 0 | 0 | $0 model usage | 32 predictions; 100.0% status accuracy |
-| Full deterministic resolution measurement | 518 | 0 | 0 | 0 | 0 | $0 model usage | 503 resolved; 15 unresolved; no output written |
+| Latest deterministic full-dataset run | 518 | 0 | 0 | 0 | 0 | $0 model usage | 508 resolved; 10 opaque-evidence cases unresolved; no output written |
+
+## Latest Gemini-enabled full-dataset attempt
+
+This run used the repository's enabled `.env` configuration and model `gemini-3.8-flash`. It investigated grounded opaque evidence, including pre-cutoff screenshots. It did not produce a submission file: 27 cases remained unresolved at the time of the run. Subsequent deterministic parsing fixes correctly map explicit backup restore permissions and reduce the unresolved count to 10 without additional model calls.
+
+| Provider | Model | API calls | Input tokens | Output tokens | Total tokens | Average total/API call | Cache hits | Estimated cost |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| Google Gemini API | `gemini-3.8-flash` | 23 | 3,527 | 214 | 3,741 | 162.7 | 0 | Unavailable |
+| **Overall for this run** |  | **23** | **3,527** | **214** | **3,741** | **162.7** | **0** | **Unavailable** |
+
+Average usage over all 518 input cases was **7.2 tokens per case**. Provider pricing was not configured, so monetary cost remains **Unavailable** rather than estimated without a source. The run's per-artifact response diagnostics were not persisted; the unresolved screenshot cases therefore remain blockers rather than being assigned unsupported states.
 
 The repository does not persist a historical ledger for every prior test, build, or development run. Aggregate counts for unrecorded historical deterministic runs, wall-clock cost, and non-Gemini infrastructure cost are **unavailable**, not assumed to be zero.
 
@@ -42,7 +53,7 @@ For the measured deterministic runs, average Gemini tokens and Gemini cost per c
 
 ## Existing tracking and final-run procedure
 
-`src/investigator.ts` records one `UsageRecord` per investigation attempt with provider, model, file ID, attempt number, outcome, cache-hit status, input tokens, and output tokens. `newUsageTracker()` creates the in-memory ledger used by `generateRows()`. Cache hits record zero model tokens; SDK responses populate token counts from `usageMetadata`.
+`src/investigator.ts` records one `UsageRecord` per investigation attempt with provider, model, file ID, attempt number, outcome, cache-hit status, input tokens, and output tokens. `newUsageTracker()` creates the in-memory ledger used by `generateRows()`. Cache hits record zero model tokens; SDK responses populate token counts from `usageMetadata`. The CLI now prints aggregate measured calls, tokens, cache hits, and model totals before refusing a run with unresolved cases.
 
 For the eventual final 518-case run, the pipeline should:
 

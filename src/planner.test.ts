@@ -1,7 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { parseCsv } from "./contracts.js";
-import { categoryFor, generateRows, policyActions, planAuthorizedCase, sortAndNumber, writeOutput } from "./planner.js";
+import {
+  addProvisionalRows,
+  categoryFor,
+  compareCaseIds,
+  generateRows,
+  policyActions,
+  planAuthorizedCase,
+  semanticOutputIssues,
+  sortAndNumber,
+  writeOutput,
+} from "./planner.js";
 import type { ValidatedInputs } from "./contracts.js";
 import type { EvidenceInvestigator } from "./investigator.js";
 import type { EvidenceObservation } from "./reconstruction.js";
@@ -21,6 +31,23 @@ const rules = policyActions([
 function observation(category: string, state: EvidenceObservation["state"], resourceId: string, systemId = "service"): EvidenceObservation {
   return { evidenceId: "evidence_1", sourcePath: "fixture", eventTime: "2026-01-01T00:00:00Z", systemId, resourceId, state, tokens: ["person@example.com"], category };
 }
+
+test("adds provisional rows without changing resolved rows and reports semantic failures", () => {
+  const resolved = planAuthorizedCase("case_1", [observation("USER_PROFILE", "ABSENT", "account_1")], rules);
+  const before = JSON.stringify(resolved);
+  const rows = addProvisionalRows([resolved], ["case_2", "case_3"]);
+
+  assert.equal(JSON.stringify(rows[0]), before);
+  assert.deepEqual(rows.slice(1), [
+    { case_id: "case_2", deletion_status: "INCOMPLETE", steps_json: [] },
+    { case_id: "case_3", deletion_status: "INCOMPLETE", steps_json: [] },
+  ]);
+  assert.deepEqual(semanticOutputIssues(rows), [
+    { caseId: "case_2", reason: "INCOMPLETE is missing FINDING, REMEDIATION, VERIFICATION steps" },
+    { caseId: "case_3", reason: "INCOMPLETE is missing FINDING, REMEDIATION, VERIFICATION steps" },
+  ]);
+  assert.throws(() => addProvisionalRows([resolved], ["case_1"]), /existing case case_1/);
+});
 
 test("preserves conditional retained records and redacts tombstones", () => {
   const deleted = planAuthorizedCase("case_absent", [observation("USER_PROFILE", "ABSENT", "account_1")], rules);
@@ -562,6 +589,10 @@ test("uses canonical phase and operation ordering with empty future evidence", (
   assert.deepEqual(steps.map((step) => [step.step_no, step.operation]), [[1, "REPORT_REMAINING_RECORD"], [2, "REPORT_EXPOSED_PII"], [3, "VERIFY_RECORD_ABSENT"]]);
 });
 
+test("sorts numbered case IDs in numeric order", () => {
+  assert.deepEqual(["case_10", "case_2", "case_1"].sort(compareCaseIds), ["case_1", "case_2", "case_10"]);
+});
+
 test("maps known resource families without treating unknown IDs as user profiles", () => {
   assert.equal(categoryFor(observation("UNKNOWN", "PRESENT", "audit_record_003")), "SECURITY_AUDIT_LOG");
   assert.equal(categoryFor(observation("UNKNOWN", "PRESENT", "marketing_001")), "MARKETING_PROFILE");
@@ -570,7 +601,7 @@ test("maps known resource families without treating unknown IDs as user profiles
   assert.equal(categoryFor(observation("UNKNOWN", "PRESENT", "object_19")), undefined);
 });
 
-test("treats backup presence as retained state without inventing a restore risk", async () => {
+test("keeps backup presence unresolved without explicit restore permission", async () => {
   const directory = path.join(tmpdir(), `backup-presence-${Date.now()}`);
   const evidenceDirectory = path.join(directory, "evidence");
   const { mkdirSync, writeFileSync: write } = await import("node:fs");
@@ -587,11 +618,8 @@ test("treats backup presence as retained state without inventing a restore risk"
   inputs.evidenceFiles = [{ file_id: "evidence_backup", file_path: "evidence/backup.json", captured_at: "2026-01-01T00:00:00Z" }];
   try {
     const result = await generateRows(inputs, directory);
-    assert.deepEqual(result.unresolvedCases, []);
-    assert.equal(result.rows[0].deletion_status, "COMPLETE");
-    assert.deepEqual(result.rows[0].steps_json.map((step) => [step.operation, step.state]), [
-      ["VERIFY_RECORD_PRESENT", "PRESENT"],
-    ]);
+    assert.deepEqual(result.unresolvedCases, ["case_1"]);
+    assert.deepEqual(result.rows, []);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

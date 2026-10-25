@@ -185,6 +185,8 @@ test("requests Gemini structured output and constrains document-only statuses", 
   assert.match(request.contents[0].parts[0].text, /delivered.*not valid state values/i);
   assert.match(request.contents[0].parts[0].text, /explicitly visible/i);
   assert.match(request.contents[0].parts[0].text, /timestamp proximity alone/i);
+  assert.match(request.contents[0].parts[0].text, /visible owner\/customer identifier conflicts/i);
+  assert.match(request.contents[0].parts[0].text, /archive presence alone is PRESENT/i);
   assert.deepEqual(response.response, {
     inspection_status: "UNRESOLVED",
     identifier_matches: ["old@example.com"],
@@ -264,6 +266,34 @@ test("rejects a valid-looking observation for an unrelated linked resource", asy
   });
   const result = await investigatePacket("case_tombstone", tombstonePacket, investigator, new Map(), newUsageTracker());
   assert.equal(result.observations.length, 0);
+  assert.match(result.diagnostic?.reason ?? "", /linked resource/i);
+});
+
+test("rejects a linked observation when the visible identity conflicts with the subject", async () => {
+  const marketingPacket: EvidencePacket = {
+    ...packet,
+    linkedResources: [{
+      systemId: "marketing_platform",
+      resourceId: "marketing_1",
+      category: "MARKETING_PROFILE",
+      linkEvidenceId: "activity_link_2",
+      linkedAt: "2026-01-01T00:05:00Z",
+      visibleLabels: ["marketing_1"],
+    }],
+  };
+  const investigator = investigatorWith({
+    inspection_status: "RESOLVED",
+    identifier_matches: ["different-owner@example.com"],
+    observations: [{
+      visible_resource_label: "marketing_1",
+      state: "PRESENT",
+      location: "profile row",
+      confidence: 0.95,
+    }],
+    unresolved_reason: null,
+  });
+  const result = await investigatePacket("case_marketing", marketingPacket, investigator, new Map(), newUsageTracker());
+  assert.deepEqual(result.observations, []);
   assert.match(result.diagnostic?.reason ?? "", /linked resource/i);
 });
 

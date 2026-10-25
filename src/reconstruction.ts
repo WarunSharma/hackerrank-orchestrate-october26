@@ -547,8 +547,7 @@ function parseJsonEvidence(fileId: string, sourcePath: string, content: string, 
       const hasEnabledState = system === "integration_service" && (enabled || disabled);
       const restoreAllowed = record.restore_allowed === true || record.restore_allowed === "true";
       const restoreBlocked = record.restore_allowed === false || record.restore_allowed === "false";
-      const unsafeRestore = (record.archive_present === true || record.archive_present === "true") && restoreAllowed;
-      const hasRestoreState = system === "backup_service" && (restoreBlocked || unsafeRestore);
+      const hasRestoreState = system === "backup_service" && (restoreBlocked || restoreAllowed);
       const supportIdentifiers = ["requester_email", "requester_name", "requester_phone"];
       const supportState = system === "support_platform"
         && supportIdentifiers.every((field) => Object.hasOwn(record, field))
@@ -808,14 +807,18 @@ function parseSqlEvidence(
     const json = values.find((value) => value.startsWith("{") && value.endsWith("}"));
     if (json) {
       const record = JSON.parse(json) as Record<string, unknown>;
-      const connectorState = values[2] === "connector_configurations" && typeof record.enabled === "boolean"
+      const collection = values[2] ?? "";
+      const connectorState = collection === "connector_configurations" && typeof record.enabled === "boolean"
         ? record.enabled ? "ACTIVE" : "DISABLED"
         : undefined;
+      const backupState = collection === "backup_catalog" ? snapshotRecordState(record, collection) : undefined;
+      const explicitState = stateFromResult(stringValue(record.result ?? record.state ?? record.status));
       return [observation(fileId, sourcePath, {
         ...record,
         system: values[1],
-        collection: values[2],
-        ...(connectorState ? { result: connectorState, record_type: "DATA_FLOW" } : { result: "FOUND" }),
+        collection,
+        record_type: connectorState ? "DATA_FLOW" : snapshotCategory(collection),
+        result: connectorState ?? backupState ?? explicitState ?? "FOUND",
         recorded_at: values.at(-1) ?? capturedAt,
       }, capturedAt)].filter((item): item is EvidenceObservation => item !== undefined);
     }

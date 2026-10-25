@@ -101,6 +101,20 @@ test("maps explicitly enabled SQL connector configurations to active flows", () 
   assert.equal(disabled.observations[0].state, "DISABLED");
 });
 
+test("maps explicit SQL backup permissions to active or blocked restore states", () => {
+  const extraction = extractEvidence(
+    { file_id: "evidence_backup_permissions", file_path: "evidence/backups.sql", captured_at: "2026-01-02T00:00:00Z" },
+    [
+      `INSERT INTO "customer_data_primary" VALUES('backup_active','backup_service','backup_catalog','{"resource_id":"backup_active","archive_path":"archive.tar","subject_reference":"user_1","restore_allowed":true}','2026-01-01T00:00:00Z');`,
+      `INSERT INTO "customer_data_primary" VALUES('backup_blocked','backup_service','backup_catalog','{"resource_id":"backup_blocked","archive_path":"archive.tar","subject_reference":"user_1","restore_allowed":false}','2026-01-01T00:00:00Z');`,
+    ].join("\n"),
+  );
+  assert.deepEqual(extraction.observations.map(({ resourceId, category, state }) => [resourceId, category, state]), [
+    ["backup_active", "BACKUP_ARCHIVE", "ACTIVE"],
+    ["backup_blocked", "BACKUP_ARCHIVE", "BLOCKED"],
+  ]);
+});
+
 test("extracts ASCII85/Flate PDF text into a grounded resource observation", () => {
   const manifest = {
     file_id: "evidence_pdf",
@@ -653,6 +667,11 @@ test("normalizes export-job snapshots and explicitly safe service-export states"
           resource_id: "backup_1",
           customer_reference: "user_1",
           restore_allowed: false,
+        }, {
+          observed_at: "2026-01-01T00:00:00Z",
+          resource_id: "backup_2",
+          customer_reference: "user_1",
+          restore_allowed: true,
         }] },
       },
     }),
@@ -667,6 +686,7 @@ test("normalizes export-job snapshots and explicitly safe service-export states"
     ["support_1", "SUPPORT_MESSAGE", "REDACTED"],
     ["flow_1", "DATA_FLOW", "DISABLED"],
     ["backup_1", "BACKUP_ARCHIVE", "BLOCKED"],
+    ["backup_2", "BACKUP_ARCHIVE", "ACTIVE"],
   ]);
 });
 

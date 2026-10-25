@@ -54,6 +54,17 @@ export interface GenerationResult {
 }
 
 const phaseOrder: Record<Phase, number> = { FINDING: 0, REMEDIATION: 1, VERIFICATION: 2 };
+export function compareCaseIds(left: string, right: string): number {
+  const leftMatch = /^(.*?)(\d+)$/.exec(left);
+  const rightMatch = /^(.*?)(\d+)$/.exec(right);
+  if (leftMatch && rightMatch && leftMatch[1] === rightMatch[1]) {
+    const leftNumber = BigInt(leftMatch[2]);
+    const rightNumber = BigInt(rightMatch[2]);
+    if (leftNumber !== rightNumber) return leftNumber < rightNumber ? -1 : 1;
+  }
+  return left.localeCompare(right);
+}
+
 const knownCategories = new Set([
   "USER_PROFILE", "SECONDARY_IDENTIFIER", "SEARCH_INDEX_ENTRY", "CACHE_ENTRY",
   "SUPPORT_MESSAGE", "SUPPORT_ATTACHMENT", "ANALYTICS_PROFILE", "PRODUCT_TELEMETRY",
@@ -152,6 +163,44 @@ export function sortAndNumber(steps: PlannedStep[]): PlannedStep[] {
       || left.system_id.localeCompare(right.system_id)
       || left.resource_id.localeCompare(right.resource_id))
     .map((item, index) => ({ ...item, step_no: index + 1 }));
+}
+
+export interface SemanticOutputIssue {
+  caseId: string;
+  reason: string;
+}
+
+export function addProvisionalRows(rows: PlannedRow[], unresolvedCaseIds: string[]): PlannedRow[] {
+  const existingCaseIds = new Set(rows.map((row) => row.case_id));
+  const provisionalRows = unresolvedCaseIds.map((caseId): PlannedRow => {
+    if (existingCaseIds.has(caseId)) throw new Error(`Cannot add a provisional row for existing case ${caseId}`);
+    return { case_id: caseId, deletion_status: "INCOMPLETE", steps_json: [] };
+  });
+  return [...rows, ...provisionalRows];
+}
+
+export function semanticOutputIssues(rows: Array<{
+  case_id: string;
+  deletion_status: string;
+  steps_json: Array<{ phase: string }>;
+}>): SemanticOutputIssue[] {
+  return rows.flatMap((row) => {
+    if (row.deletion_status === "COMPLETE" && row.steps_json.length === 0) {
+      return [{ caseId: row.case_id, reason: "COMPLETE has no verification steps" }];
+    }
+    const phaseRanks: Record<string, number> = { FINDING: 0, REMEDIATION: 1, VERIFICATION: 2 };
+    if (row.steps_json.some((step, index) =>
+      index > 0 && phaseRanks[step.phase] < phaseRanks[row.steps_json[index - 1].phase])) {
+      return [{ caseId: row.case_id, reason: "Step phases are out of order" }];
+    }
+    if (row.deletion_status !== "INCOMPLETE") return [];
+    const phases = new Set(row.steps_json.map((step) => step.phase));
+    const missing = (["FINDING", "REMEDIATION", "VERIFICATION"] as const)
+      .filter((phase) => !phases.has(phase));
+    return missing.length > 0
+      ? [{ caseId: row.case_id, reason: `INCOMPLETE is missing ${missing.join(", ")} steps` }]
+      : [];
+  });
 }
 
 export function planAuthorizedCase(
@@ -318,6 +367,7 @@ export async function generateRows(
   inputs = readValidatedInputs(),
   root = datasetDirectory,
   investigator: EvidenceInvestigator = new NoopEvidenceInvestigator(),
+  usage = newUsageTracker(),
 ): Promise<GenerationResult> {
   const subjects = buildSubjects(inputs.userIdentities, inputs.userAuditLog);
   const resourceCandidates = inputs.systemActivity
@@ -334,8 +384,7 @@ export async function generateRows(
   const unresolvedCases: string[] = [];
   const rows: PlannedRow[] = [];
   const cache = new Map();
-  const usage = newUsageTracker();
-  for (const request of inputs.deletionRequests.slice().sort((left, right) => left.case_id.localeCompare(right.case_id))) {
+  for (const request of inputs.deletionRequests.slice().sort((left, right) => compareCaseIds(left.case_id, right.case_id))) {
       if (classifyAuthorization(request.request_text) === "NOT_AUTHORIZED") {
         rows.push({ case_id: request.case_id, deletion_status: "NOT_APPLICABLE", steps_json: [] });
         continue;
@@ -378,6 +427,13 @@ export async function generateRows(
         unresolvedCases.push(request.case_id);
         continue;
       }
+      if (state.some((observation) => {
+        const category = categoryFor(observation);
+        return category === "BACKUP_ARCHIVE" && !["ACTIVE", "BLOCKED"].includes(observation.state);
+      })) {
+        unresolvedCases.push(request.case_id);
+        continue;
+      }
       rows.push(planAuthorizedCase(request.case_id, state, actions));
   }
   return { rows, unresolvedCases };
@@ -391,7 +447,7 @@ export function writeOutput(rows: PlannedRow[], destination = outputPath, eviden
   const canonicalRows = rows.map((row) => ({
     ...row,
     steps_json: sortAndNumber([...row.steps_json]),
-  })).sort((left, right) => left.case_id.localeCompare(right.case_id));
+  })).sort((left, right) => compareCaseIds(left.case_id, right.case_id));
   if (new Set(canonicalRows.map((row) => row.case_id)).size !== canonicalRows.length) {
     throw new Error("Output contains duplicate case_id values");
   }
